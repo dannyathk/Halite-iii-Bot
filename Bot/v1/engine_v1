@@ -1,0 +1,163 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Oct 19 22:37:06 2018
+
+@author: chanh
+"""
+import numpy as np
+from hlt.positionals import Direction, Position
+from hlt import constants
+import logging
+import math
+
+class engine_1(object):
+    
+    def __init__(self, ship, player, game_map):
+        self.ship = ship
+        self.game_map = game_map
+        self.player = player
+        self.destination = None
+        self.summary = None
+        
+    @staticmethod
+    def _efficient_move(self, target, theta=0.2):
+        if self.ship.halite_amount*theta < self.game_map[self.ship.position].halite_amount*0.1:
+            """Ship stays if false"""
+            move = False
+
+        else:
+            """Ship leaves if True"""
+            move = True
+
+        return move    
+    
+    @staticmethod
+    def _log_info(self):            
+        self.summary = [self.ship.id, self.ship.position, self.dir_to_des]     
+        
+        
+    def radius_search(self, radius=5, k=0.3, searchable_dis=100):
+        """
+        radius: range that ship search for position with highest halite
+             k: maximum cost porportional to its own halite that ship willing to pay to travel to next position      
+        """
+        max_halite = 0
+        max_pos = self.ship.position
+        
+        for x in np.arange(-radius, radius+1):
+            for y in np.arange(-radius, radius+1):
+                
+                x_cord, y_cord = self.ship.position.x+x, self.ship.position.y+y
+                halite_content = self.game_map[Position(x_cord, y_cord)].halite_amount
+                dist = self.game_map.calculate_distance(self.ship.position, Position(x_cord,y_cord))
+                
+                if  dist <= radius:
+                    if halite_content > max_halite and self.game_map[Position(x_cord,y_cord)].is_empty:
+                        max_pos = Position(x_cord,y_cord)
+                        max_halite = halite_content
+                 
+                self.destination = max_pos
+                    
+        if self.game_map.calculate_distance(self.ship.position, self.destination) > 0:            
+            done = False
+            source, target = self.ship.position, self.destination
+            cost_path = 0
+            
+            while (not done):
+                """Calculate cost of moving away"""
+                cost_path += self.game_map[source].halite_amount*0.1
+                """Move to next closer position towards target location"""
+                source = self.game_map[source].position.directional_offset(self.game_map.get_unsafe_moves(source, target)[0])
+
+                """Stop when arriving the target location"""
+                done = (self.game_map.calculate_distance(source, target)==0)
+        
+            """Navigate if Current Position Halite to Destination Halite Ratio >= k"""
+            if (self.game_map[target].halite_amount - cost_path)*k > self.game_map[self.ship.position].halite_amount:
+                self.destination = max_pos
+            else:
+                self.destination = self.ship.position
+
+
+        
+    def action(self, beta=0.7):
+        if beta*1000 <= self.ship.halite_amount:
+            """Return to Shipyard Condition"""
+            self.destination = self.game_map[self.player.shipyard].position
+            
+        """Execute naive_navigate only once to avoid"""
+        dir_to_des = self.game_map.naive_navigate(self.ship, self.destination)
+        
+        if self._efficient_move(self, self.ship.position.directional_offset(dir_to_des)):
+            """If destination if not the current position and efficient to move away from current postion"""
+            self.command = self.ship.move(dir_to_des)
+            self.log = "Navigate to {}".format(self.destination)
+            self.dir_to_des = dir_to_des
+        else:
+            """Mining at destination location"""
+            self.command = self.ship.stay_still()
+            self.log = "Mining at {}".format(self.destination)
+            self.dir_to_des = (0,0)
+            
+        if self.dir_to_des==(0,0) and (self.ship.halite_amount==1000 or self.game_map[self.ship.position].halite_amount<=constants.MAX_HALITE*0.025):
+            """Prevent ship to stay forever"""
+            max_pos = self.ship.position
+            max_halite = 0
+            for pos in self.ship.position.get_surrounding_cardinals():
+                if not (self.game_map[pos].is_occupied and self.game_map[pos].has_structure):
+                    if self.game_map[pos].halite_amount>max_halite:
+                        max_pos = pos
+            self.dir_to_des = self.game_map.naive_navigate(self.ship, max_pos)
+            self.command = self.ship.move(self.dir_to_des)
+            self.log = "Low halite at {}".format(self.ship.position)
+                        
+                 
+        self._log_info(self)
+        
+        logging.info("Status of Ship {} at {} with {} : {}".format(self.ship.id, self.ship.position, self.ship.halite_amount, self.log))
+            
+                                                                                                                                  
+class team_engine(object):
+    
+    def __init__(self, team_queue):
+        self.team_queue = team_queue
+        logging.info("Team Engine Activiated")
+    
+    @staticmethod
+    def vector_module(v):
+        return math.sqrt(v[0]**2 + v[1]**2)
+    
+    @staticmethod
+    def vector_sum(v1, v2):
+        return (v1[0]+v2[0], v1[1]+v2[1])
+    
+    def move_adjustment(self):
+        
+        queue = self.team_queue
+        for i in np.arange(len(queue)):
+            this_ship_id = queue[i][0]
+            this_ship_pos = queue[i][1]
+            this_ship_dir = queue[i][2]
+            
+            this_ship_next_pos = Position(this_ship_pos.x+this_ship_dir[0], this_ship_pos.y+this_ship_dir[1]) 
+            
+            for other_ship in queue[i+1:]:
+                other_ship_id = other_ship[0]
+                other_ship_pos = other_ship[1]
+                other_ship_dir = other_ship[2]
+                
+                other_ship_next_pos = Position(other_ship_pos.x+other_ship_dir[0], other_ship_pos.y+other_ship_dir[1]) 
+                
+                distance = math.sqrt((this_ship_pos.x - other_ship_pos.x)**2 + (this_ship_pos.y - other_ship_pos.y)**2)
+                logging.info("Move Adjustment for {} {} {} {}".format(this_ship_id, this_ship_next_pos, other_ship_id, other_ship_next_pos))
+
+                if this_ship_next_pos==other_ship_pos and other_ship_next_pos==this_ship_pos:                
+                    logging.info("Adjust Here")
+                    
+                
+                
+            
+                #if distance==1.0 and self.vector_module(this_ship_dir)>0 and self.vector_module(other_ship_dir)>0 and \
+                #    self.vector_module(self.vector_sum(this_ship_dir, other_ship_dir))==0:
+
+        
